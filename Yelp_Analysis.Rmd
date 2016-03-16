@@ -1,0 +1,267 @@
+---
+title: 'Business Analytics & Data Science: Yelp Project'
+output: html_document
+author: Maryam Majeed, Priya Suchak, Shantanu Indra
+---
+
+#### Reading the dataset downloaded from the Yelp Dataset Challenge
+
+```{r}
+#Reading the dataset downloaded from the Yelp Dataset Challenge
+library(readr)
+business = read_csv("yelp_academic_dataset_business.csv")
+checkin = read_csv("yelp_academic_dataset_checkin.csv")
+reviews = read_csv("yelp_academic_dataset_review.csv")
+user = read_csv("yelp_academic_dataset_user.csv")
+filter = business[grep("u,',R,e,s,t,a,u,r,a,n,t,s,'",business$categories),]
+restaurants = merge(filter,reviews,by = "business_id")
+```
+
+#### Plot the business distribution across the globe. 10 cities across 4 countries
+```{r}
+#Plot countries in map
+library(maps)
+map("world", fill=TRUE, col="white", bg="lightblue", ylim=c(-60, 90), mar=c(0,0,0,0))
+points(business$longitude,business$latitude, col="red", pch=16)
+```
+
+#### Distribution of ratings across restaurants
+```{r}
+#Plot for star rating disturibution
+library(plyr)
+rating_distribution = count(filter, "stars")
+plot_rating = t(matrix(rating_distribution$freq))
+colnames(plot_rating) = rating_distribution$stars
+par(bg="white")
+barplot(plot_rating,
+      main=expression(" Rating Distribution"),
+     xlab="Rating",
+     ylab="Number of restaurants",
+     col ="black", lwd=3,
+     col.lab="blue",
+     cex.lab=1,cex.lab = 1.25,axes=TRUE)
+```
+
+#### Mood Scoring of rating 3
+
+```{r}
+# Function for clean up
+cleaning_corpus = function(text) {
+  review_corpus = Corpus(VectorSource(text))
+  review_corpus = tm_map(review_corpus,tolower)
+  review_corpus = tm_map(review_corpus,stemDocument)
+  review_corpus = tm_map(review_corpus,removeWords,c(stopwords("english"),"can","also","let","see","way","got","just","get"))
+  review_corpus = tm_map(review_corpus,removePunctuation)
+  review_corpus = tm_map(review_corpus,removeNumbers)
+  review_corpus = tm_map(review_corpus,PlainTextDocument)
+  result = review_corpus
+}
+
+## To get only Restaurants data having rating = 3
+data_b = business[,c("business_id","categories","stars","review_count")]
+data_b = subset(data_b,stars ==3)
+data_b = data_b[grep("u,',R,e,s,t,a,u,r,a,n,t,s,'",data_b$categories),]
+ 
+## Filtering only rating, business id and text columns from reviews data frame for mood scoring
+data_r = reviews[,c("business_id","stars","text")]
+## filtering only those reviews that have 3 rating
+data_r = subset(data_r,stars==3)
+ 
+## Combining business and reviews data sets together for mood scoring of restaurants with rating = 3
+br_data = merge(data_b,data_r,by = "business_id")
+reviews_3r = br_data$text
+ 
+## Text Cleaning before Mood Scoring
+library(tm)
+library(stringr)
+ctext = cleaning_corpus(reviews_3r)
+text = NULL
+    	for (j in 1:length(ctext)) {
+        	temp = ctext[[j]]$content
+        	if (temp!="") { text = c(text,temp) }
+    	}
+text = as.array(text)
+ 
+#MOOD SCORING USING HARVARD INQUIRER
+#Read in the Harvard Inquirer Dictionary
+#And create a list of positive and negative words
+HIDict = readLines("inqdict.txt")
+dict_pos = HIDict[grep("Pos",HIDict)]
+poswords = NULL
+for (s in dict_pos) {
+           	s = strsplit(s,"#")[[1]][1]
+           	poswords = c(poswords,strsplit(s," ")[[1]][1])
+}
+dict_neg = HIDict[grep("Neg",HIDict)]
+negwords = NULL
+for (s in dict_neg) {
+           	s = strsplit(s,"#")[[1]][1]
+           	negwords = c(negwords,strsplit(s," ")[[1]][1])
+}
+poswords = tolower(poswords)
+negwords = tolower(negwords)
+poswords = unique(poswords)
+negwords = unique(negwords)
+text = str_replace_all(text,"nbsp"," ")
+text = unlist(strsplit(text," "))
+posmatch = match(text,poswords)
+numposmatch = length(posmatch[which(posmatch>0)])
+negmatch = match(text,negwords)
+numnegmatch = length(negmatch[which(negmatch>0)])
+labels = print(c(numposmatch,numnegmatch))
+names(labels) = c("POSITIVE","NEGATIVE")
+ 
+library(plotrix)
+pie3D(c(numposmatch,numnegmatch),labels = names(labels),col= c("green","red"),explode= 0.1,main="Pie Chart of Mood Scoring of Rating 3")
+```
+
+#### Plotting the Word Cloud of reviews in each rating
+
+```{r}
+# Word cloud for 10000 reviews per rating
+# Function to do this computation
+library(wordcloud)
+word_cloud = function(rating) {
+  sub = subset(restaurants, restaurants$stars.y == rating)
+  text = sub[sample(nrow(sub),10000),]
+  review_corpus = cleaning_corpus(text$text)
+  tdm = TermDocumentMatrix(review_corpus,control=list(minWordLength=4))
+  tdm2 = as.matrix(tdm)
+  wordcount = sort(rowSums(tdm2),decreasing=TRUE)
+  tdm_names = names(wordcount)
+  wordcloud(tdm_names,wordcount,scale=c(5,0.5), max.words=100, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, 'Dark2'))
+}
+word_cloud(1)
+word_cloud(2)
+word_cloud(3)
+word_cloud(4)
+word_cloud(5)
+```
+
+#### Quality of Reviews
+
+#### Plotting the Average WordCount of Reviews across Rating
+```{r}
+# Average Word count vs Rating
+library(stringi)
+data = restaurants[,c("text","stars.y","votes_useful")]
+data$count = stri_count(data$text,regex="\\S+")
+count_plot = aggregate(data[, 4], list(data$stars.y), mean)
+plot(count_plot$Group.1,count_plot$x,
+      main=expression(" Average Word Count Across Ratings"),type ="o",
+     xlab="Rating",
+     ylab="Average Word Count",
+     col ="green", lwd=3,
+     col.lab="blue",
+     cex.lab=1,cex.lab = 1.25,axes=TRUE)
+
+```
+
+#### WordCloud of top useful 25 reviews
+
+```{r}
+# Wordcloud of top 25 useful ratings
+data = head(restaurants[order(restaurants$votes_useful, decreasing = T),], n = 25)
+top_data = data$text
+ctext = cleaning_corpus(top_data)
+tdm = TermDocumentMatrix(ctext,control=list(minWordLength=1))
+tdm2 = as.matrix(tdm)
+wordcount = sort(rowSums(tdm2),decreasing=TRUE)
+tdm_names = names(wordcount)
+wordcloud(tdm_names,wordcount, scale=c(5,0.5), max.words=100, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, 'Dark2'))
+
+```
+
+#### Readability Calculation focusing on Gunning Fog Index
+
+```{r}
+# Select 500 reviews from each rating and then plot readability
+# Function to compute readability
+library(koRpus)
+compute_readability = function(rating,textfile) {
+review = restaurants[sample(which (restaurants$stars.y == rating), 500),]
+reviewslist <- as.list(review$text)
+lapply(reviewslist,write, textfile,append = TRUE)
+l2.tagged =  lapply(textfile, tokenize, lang="en")
+l2.readability <- lapply(l2.tagged,readability)  
+# l2.readability  (This prints all the readability indices)
+}
+#This is for calling the readability function. We are commenting this since it takes lot of time for knitting.
+
+#compute_readability(1,"readability_1.txt")
+#compute_readability(2,"readability_2.txt")
+#compute_readability(3,"readability_3.txt")
+#compute_readability(4,"readability_4.txt")
+#compute_readability(5,"readability_5.txt")
+
+# We take the Gunning Fog out of each of the above computed readability and then manually put in a dataframe
+#Plotting Gunning Fog Index vs Rating
+fogindex = data.frame("rating"=c(1,2,3,4,5),"index"=c(8.36,8.73,8.89,8.64,8.79))
+plot(fogindex$rating,
+     fogindex$index,
+     main=expression("Average Review Readability Across Ratings"),
+     xlab="Rating",
+     ylab="Average_Fog_Index",
+     type="o",col ="green", lwd=3,
+     col.lab="blue",
+     cex.lab=1,cex.lab = 1.25)
+
+```
+
+#### Linear Regression to determine the factors which affect a restaurant's rating
+```{r}
+#Linear Regression to predict what affects restaurant's rating
+model = lm(filter$stars ~ filter$`attributes_Accepts Credit Cards` +  filter$attributes_Alcohol    + filter$attributes_Attire + filter$attributes_Caters + filter$attributes_Delivery + filter$`attributes_Drive-Thru`+ filter$`attributes_Good For Dancing` + filter$`attributes_Good For Groups` + filter$`attributes_Happy Hour`  + filter$attributes_Smoking   + filter$`attributes_Wi-Fi` + filter$review_count)
+summary (model)
+```
+
+####Predict a rating based on reviews with Classification models SVM, GLMNET, MAXENT. We train a data of 9000 reviews and test around 200 reviews. We then plot the results
+
+```{r}
+# Predict a rating based on review with Classification models
+library("RTextTools")
+dataset = restaurants[,c("text","stars.y","votes_useful")]
+dataset$count = stri_count(dataset$text,regex="\\S+")
+df = dataset[sample(nrow(dataset),9000),]
+## Text cleaning within the create_matrix function
+dtMatrix = create_matrix(df$text, language="english", removeNumbers=TRUE,stemWords=TRUE)
+container = create_container(dtMatrix,cbind(df$stars,df$count,df$votes_useful),trainSize=1:8800,testSize= 8801:9000, virgin=FALSE)
+low_model <- train_models(container, c("SVM","GLMNET","MAXENT"))
+data_models = classify_models(container,low_model)
+analytics = create_analytics(container,data_models)
+summary(analytics)
+ 
+# CREATE THE data.frame SUMMARIES
+topic_summary <- analytics@label_summary
+alg_summary <- analytics@algorithm_summary
+ens_summary <-analytics@ensemble_summary
+doc_summary <- analytics@document_summary
+ 
+#Plotting the above values
+top = doc_summary
+plotdata = top[,c("SVM_PROB","GLMNET_PROB","MAXENTROPY_PROB")]
+plotdata$REVIEW_NO = seq.int(nrow(plotdata))
+
+library(reshape)
+library(ggplot2)
+df <- melt(plotdata , id.vars = 'REVIEW_NO')
+names(df) =c("Review_no","Prediction_Models","value")
+ggplot(df, aes(x = Review_no, y = value, colour = Prediction_Models)) +
+ 	geom_line(size =0.5) + ylab(label="Prediction Probability") +
+ 	xlab("Review Number") +
+     scale_colour_manual(values=c("green", "blue","red"))
+```
+
+#### Plotting a WordCloud of packages used
+```{r}
+# For showing the packages as a word cloud
+packages = c(14,13,12,13,12,12,11,10,10,10,10)
+class(packages)
+plot_rating = t(matrix(packages))
+names(packages) = c("readr","korpus","Rtexttools","maps","plyr","stringi","plotrix","ggplot2","tm","wordcloud","reshape")
+tdm_names = names(packages)
+ wordcloud(tdm_names,packages,scale=c(5,0.5), max.words=100, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, 'Dark2'))
+ 
+```
+
+
